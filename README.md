@@ -20,6 +20,7 @@ this fault. The builder kept 3.1.2, so VidCtrl now builds its own.
 | dav1d | 1.5.4 | reading AV1 |
 | zimg | 3.0.6 | HDR to SDR (`zscale`) |
 | LAME | 3.100 | MP3, "Get the sound" |
+| libvmaf | 3.2.1 (models built in) | VMAF in "Compare with the original" |
 
 VideoToolbox, AudioToolbox, zlib, bzip2 and iconv come from macOS itself.
 The build is GPL version 3 (`--enable-gpl --enable-version3`), with nothing

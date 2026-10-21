@@ -52,7 +52,7 @@ done
 grep -qE "^ \S+ libdav1d " <<< "$("$ffmpeg" -hide_banner -decoders)" ||
   fail "no libdav1d decoder"
 filters="$("$ffmpeg" -hide_banner -filters)"
-for name in zscale tonemap xpsnr scale; do
+for name in zscale tonemap xpsnr libvmaf scale; do
   grep -qE "^ \S+ $name " <<< "$filters" || fail "no $name filter"
 done
 
@@ -79,7 +79,12 @@ for arch in arm64 x86_64; do
     -i "$work/pattern.mkv" \
     -lavfi "[0:v:0]$byorder[d];[1:v:0]$byorder[r];[d][r]xpsnr=shortest=1" \
     -f null - 2>&1 | grep -oE 'XPSNR +y: +[0-9.inf]+' | awk '{print $3}')"
-  echo "AV1 on $arch: XPSNR $score dB"
+  vmaf="$("$ffmpeg" -nostdin -hide_banner -nostats -i "$work/av1-$arch.mkv" \
+    -i "$work/pattern.mkv" \
+    -lavfi "[0:v:0]$byorder[d];[1:v:0]$byorder[r];[d][r]libvmaf=model=version=vmaf_v0.6.1" \
+    -f null - 2>&1 | grep -oE 'VMAF score: +[0-9.]+' | awk '{print $3}')"
+  echo "AV1 on $arch: XPSNR $score dB, VMAF ${vmaf:-none}"
+  [[ -n "$vmaf" ]] || fail "VMAF gave no score: its built-in models are missing"
   awk -v s="$score" 'BEGIN { exit !(s == "inf" || s + 0 >= 42) }' ||
     fail "AV1 on $arch scores $score dB, below 42"
 done

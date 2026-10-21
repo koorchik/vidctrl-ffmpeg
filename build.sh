@@ -20,7 +20,7 @@ set -euo pipefail
 # hence the ${array[@]+"${array[@]}"} below.
 
 # The release this script makes: FFmpeg's version and this build's number.
-version=8.1.3-1
+version=8.1.3-2
 
 # VidCtrl's own minimum (macos/Runner.xcodeproj in VidCtrl).
 min_macos=12.0
@@ -33,6 +33,7 @@ sources=(
   "x264|x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2|https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2|6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224"
   "dav1d|dav1d-1.5.4.tar.xz|https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz|686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5"
   "zimg|zimg-release-3.0.6.tar.gz|https://github.com/sekrit-twc/zimg/archive/refs/tags/release-3.0.6.tar.gz|be89390f13a5c9b2388ce0f44a5e89364a20c1c57ce46d382b1fcc3967057577"
+  "vmaf|vmaf-3.2.1.tar.gz|https://github.com/Netflix/vmaf/archive/refs/tags/v3.2.1.tar.gz|5df7386911bc15fd1ca783132528748d219768ae4fc5f8e0b61184f041648092"
   "lame|lame-3.100.tar.gz|https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz|ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
 )
 
@@ -154,8 +155,7 @@ build_arch() {
     -DBUILD_APPS=OFF -DBUILD_TESTING=OFF
   ninja -C "$work/$arch/svt-av1" install
 
-  log "$arch: dav1d"
-  src="$(source_dir dav1d)"
+  # Meson's description of the other processor, for dav1d and libvmaf.
   local cross_file=()
   if [[ "$arch" != "$native" ]]; then
     cat > "$work/$arch/meson-cross.txt" <<EOF
@@ -169,6 +169,8 @@ nasm = 'nasm'
 [built-in options]
 c_args = ['-mmacosx-version-min=$min_macos']
 c_link_args = ['-mmacosx-version-min=$min_macos']
+cpp_args = ['-mmacosx-version-min=$min_macos']
+cpp_link_args = ['-mmacosx-version-min=$min_macos']
 
 [host_machine]
 system = 'darwin'
@@ -178,10 +180,21 @@ endian = 'little'
 EOF
     cross_file=(--cross-file "$work/$arch/meson-cross.txt")
   fi
+
+  log "$arch: dav1d"
+  src="$(source_dir dav1d)"
   meson setup "$work/$arch/dav1d" "$src" ${cross_file[@]+"${cross_file[@]}"} \
     --prefix="$prefix" --libdir=lib --buildtype=release \
     --default-library=static -Denable_tools=false -Denable_tests=false
   ninja -C "$work/$arch/dav1d" install
+
+  log "$arch: libvmaf"
+  src="$(source_dir vmaf)"
+  meson setup "$work/$arch/vmaf" "$src/libvmaf" ${cross_file[@]+"${cross_file[@]}"} \
+    --prefix="$prefix" --libdir=lib --buildtype=release \
+    --default-library=static -Denable_tests=false -Denable_docs=false \
+    -Denable_tools=false -Dbuilt_in_models=true -Denable_float=true
+  ninja -C "$work/$arch/vmaf" install
 
   log "$arch: FFmpeg"
   src="$(source_dir ffmpeg)"
@@ -203,7 +216,7 @@ EOF
       --enable-videotoolbox --enable-audiotoolbox \
       --enable-zlib --enable-bzlib --enable-iconv \
       --enable-libsvtav1 --enable-libx265 --enable-libx264 \
-      --enable-libdav1d --enable-libmp3lame --enable-libzimg \
+      --enable-libdav1d --enable-libmp3lame --enable-libzimg --enable-libvmaf \
       --disable-ffplay --disable-doc --disable-debug \
       --enable-static --disable-shared &&
     make -j"$jobs" &&
