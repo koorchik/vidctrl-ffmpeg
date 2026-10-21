@@ -1,0 +1,49 @@
+# Builds FFmpeg for macOS with build.sh, checks it with check.sh and, when
+# asked, publishes it as a release named after `version` in build.sh.
+# Started by hand: Actions, "Build", "Run workflow".
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the build as a release
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    # Apple Silicon. Rosetta runs the Intel half for check.sh.
+    runs-on: macos-15
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tools
+        run: brew install cmake meson ninja nasm pkgconf autoconf automake libtool
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Check
+        env:
+          # Here both halves must be checked, not only the one the Mac runs.
+          CHECK_EVERY_ARCH: "1"
+        run: ./check.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-macos
+          path: dist/
+
+      - name: Publish
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^version=//p' build.sh)"
+          gh release create "$version" dist/* \
+            --title "FFmpeg $version for macOS" \
+            --notes-file work/universal/BUILDINFO.txt
