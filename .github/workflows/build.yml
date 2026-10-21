@@ -1,23 +1,21 @@
-# Builds FFmpeg for macOS with build.sh, checks it with check.sh and, when
-# asked, publishes it as a release named after `version` in build.sh.
-# Started by hand: Actions, "Build", "Run workflow".
+# Builds FFmpeg for macOS, Linux and Windows with build.sh, checks each build
+# with check.sh and, when asked, publishes them as one release named after
+# `version` in build.sh. Started by hand: Actions, "Build", "Run workflow".
 name: Build
 
 on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the build as a release
+        description: Publish the builds as a release
         type: boolean
         default: false
 
 jobs:
-  build:
+  macos:
     # Apple Silicon. Rosetta runs the Intel half for check.sh.
     runs-on: macos-15
     timeout-minutes: 180
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -25,7 +23,7 @@ jobs:
         run: brew install cmake meson ninja nasm pkgconf autoconf automake libtool
 
       - name: Build
-        run: ./build.sh
+        run: ./build.sh macos
 
       - name: Check
         env:
@@ -35,15 +33,116 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ffmpeg-macos
+          name: macos
           path: dist/
 
+  linux:
+    # The Ubuntu VidCtrl's Linux download is built on: FFmpeg asks for no
+    # newer C library than the app does.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake meson ninja-build nasm \
+            pkg-config autoconf automake libtool xz-utils bzip2 zip xxd
+
+      - name: Build
+        run: ./build.sh linux
+
+      - name: Check
+        run: ./check.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: dist/
+
+  windows:
+    # Cross-compiled on Ubuntu, and checked there under Wine, which also
+    # lists the DLLs the programs need.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake meson ninja-build nasm \
+            pkg-config autoconf automake libtool xz-utils bzip2 zip xxd \
+            gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix wine wine64
+
+      - name: Build
+        run: ./build.sh windows
+
+      - name: Check under Wine
+        run: ./check.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/
+
+  windows-check:
+    # The same checks on Windows itself.
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows
+          path: dist
+
+      - name: Unpack
+        shell: pwsh
+        run: Expand-Archive -Path (Get-Item dist/ffmpeg-*-windows-x64.zip) -DestinationPath work/windows
+
+      - name: Check
+        run: ./check.sh work/windows
+
+  publish:
+    needs: [macos, linux, windows, windows-check]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish
-        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^version=//p' build.sh)"
-          gh release create "$version" dist/* \
-            --title "FFmpeg $version for macOS" \
-            --notes-file work/universal/BUILDINFO.txt
+          cd dist
+          {
+            echo "Static ffmpeg and ffprobe for VidCtrl, GPL v3:"
+            echo
+            echo "- \`ffmpeg-$version-macos.zip\`: macOS, universal (Apple Silicon and Intel)"
+            echo "- \`ffmpeg-$version-linux-x64.zip\`: Linux x86-64"
+            echo "- \`ffmpeg-$version-windows-x64.zip\`: Windows x64"
+            echo "- \`ffmpeg-$version-sources.tar\`: every source and build.sh"
+            echo
+            echo "Each zip's BUILDINFO.txt lists its sources and configure options."
+            echo
+            echo '```'
+            sha256sum ffmpeg-*
+            echo '```'
+          } > notes.md
+          gh release create "$version" ffmpeg-"$version"-* \
+            --title "FFmpeg $version for VidCtrl" --notes-file notes.md
