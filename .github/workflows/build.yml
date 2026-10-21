@@ -80,7 +80,7 @@ jobs:
         run: ./build.sh windows
 
       - name: Check under Wine
-        run: ./check.sh
+        run: ./check.sh work/windows
 
       - uses: actions/upload-artifact@v7
         with:
